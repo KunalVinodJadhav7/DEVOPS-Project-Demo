@@ -1,0 +1,67 @@
+pipeline {
+    agent any
+
+    environment {
+        REGISTRY_CREDENTIALS = 'docker-hub-credentials-id'
+        IMAGE_NAME = 'kunaljadhav/leave-approval-system'
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Setup Python Environment') {
+            steps {
+                sh '''
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Run Unit & Component Tests') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    pytest --maxfail=1 --disable-warnings -v
+                '''
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+                    sh "docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
+                }
+            }
+        }
+
+        stage('Deploy to Staging Container') {
+            steps {
+                sh '''
+                    docker stop leave-app-container || true
+                    docker rm leave-app-container || true
+                    docker run -d --name leave-app-container -p 8000:8000 ${IMAGE_NAME}:latest
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo 'Pipeline completed successfully: Application deployed and running!'
+        }
+        failure {
+            echo 'Pipeline failed during execution checks.'
+        }
+    }
+}

@@ -1,0 +1,263 @@
+Employee Leave Approval System - Project Documentation1. Executive Summary & Project OverviewThe Employee Leave Approval System is a robust, multi-tier enterprise application designed to automate, streamline, and secure the end-to-end leave management lifecycle. Traditional leave approval workflows suffer from bottlenecks, lack of accountability, and manual tracking inefficiencies. This project solves these challenges by implementing an automated 5-Tier Role-Based Access Control (RBAC) model, a sequential state-machine workflow engine powered by FastAPI, and a complete DevOps CI/CD pipeline utilizing Jenkins, Docker, and Ansible/Puppet.2. System Architecture & WorkflowThe 5-Tier Organizational HierarchyEmployee: Submits leave requests and supporting documents, tracks request statuses.HR (Tier 2): Performs initial compliance verification, policy checks, and document validation.Manager (Tier 3): Reviews team availability and grants direct line-manager approval.Admin / Department Head (Tier 4): Provides institutional oversight, exception handling, and final authorization.Super Admin (Tier 5): Manages system infrastructure, database configurations, security policies, and global notification dispatch.Sequential State Machine Workflow$$\text{PENDING\_HR} \longrightarrow \text{PENDING\_MANAGER} \longrightarrow \text{PENDING\_ADMIN} \longrightarrow \text{APPROVED / REJECTED}$$[Employee UI / Selenium] 
+       │
+       ▼ (1. Submit Leave + Documents)
+[FastAPI Backend Engine] 
+       ├─► Pydantic Data/Doc Validation
+       ├─► DB State: PENDING_HR
+       │
+       ▼ (2. HR Review Step)
+[HR Reviewer Action] ──► DB State: PENDING_MANAGER
+       │
+       ▼ (3. Manager/Reviewer Approval)
+[Manager Action] ──────► DB State: PENDING_ADMIN
+       │
+       ▼ (4. Admin Oversight & Finalize)
+[Admin Action] ────────► DB State: APPROVED / REJECTED
+       │
+       ▼ (5. Status Update & Notification)
+[Employee Notification Trigger (Super Admin)]
+3. Database Schema & Initialization (schema.sql)SQL-- Create Database
+CREATE DATABASE IF NOT EXISTS leave_approval_db;
+USE leave_approval_db;
+
+-- 1. Roles Table (5-Tier Organizational Hierarchy)
+CREATE TABLE IF NOT EXISTS roles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    role_name VARCHAR(50) UNIQUE NOT NULL, 
+    description VARCHAR(255)
+);
+
+INSERT INTO roles (role_name, description) VALUES 
+('employee', 'Standard user who submits and tracks leave requests'),
+('hr', 'Tier 2 reviewer for initial HR policy verification'),
+('manager', 'Tier 3 reviewer for direct team lead/manager approval'),
+('admin', 'Tier 4 department head or admin oversight and final decision'),
+('super_admin', 'Tier 5 system infrastructure and notification dispatch control');
+
+-- 2. Users Table
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(100) UNIQUE NOT NULL,
+    email VARCHAR(150) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+);
+
+-- 3. Leave Requests Table
+CREATE TABLE IF NOT EXISTS leave_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    employee_id INT NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    reason VARCHAR(250) NOT NULL,
+    status ENUM('PENDING_HR', 'PENDING_MANAGER', 'PENDING_ADMIN', 'APPROVED', 'REJECTED') DEFAULT 'PENDING_HR',
+    document_name VARCHAR(255) DEFAULT NULL,
+    hr_comments TEXT DEFAULT NULL,
+    manager_comments TEXT DEFAULT NULL,
+    admin_notes TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 4. Audit Logs Table
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    leave_request_id INT NOT NULL,
+    actor_id INT NOT NULL,
+    action_performed VARCHAR(100) NOT NULL,
+    comments TEXT DEFAULT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (leave_request_id) REFERENCES leave_requests(id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 5. Automated Trigger: Log Status Updates Automatically
+DELIMITER //
+CREATE TRIGGER after_leave_status_update
+AFTER UPDATE ON leave_requests
+FOR EACH ROW
+BEGIN
+    IF OLD.status <> NEW.status THEN
+        INSERT INTO audit_logs (leave_request_id, actor_id, action_performed, comments)
+        VALUES (
+            NEW.id, 
+            NEW.employee_id,
+            CONCAT('STATUS_CHANGE_TO_', NEW.status),
+            COALESCE(NEW.admin_notes, NEW.manager_comments, NEW.hr_comments, 'Automated status progression')
+        );
+    END IF;
+END//
+DELIMITER ;
+4. Backend Source Code (main.py)Pythonfrom datetime import date
+from enum import Enum
+from typing import List, Optional
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
+from pydantic import BaseModel, Field
+
+app = FastAPI(
+    title="Employee Leave Approval System",
+    description="5-Tier Enterprise Workflow MVP (Employee -> HR -> Manager -> Admin -> Super Admin)",
+    version="2.0.0"
+)
+
+class UserRole(str, Enum):
+    EMPLOYEE = "employee"
+    HR = "hr"
+    MANAGER = "manager"
+    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
+
+class LeaveStatus(str, Enum):
+    PENDING_HR = "PENDING_HR"
+    PENDING_MANAGER = "PENDING_MANAGER"
+    PENDING_ADMIN = "PENDING_ADMIN"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+LEAVE_DATABASE = []
+
+class LeaveRequestResponse(BaseModel):
+    id: int
+    employee_id: int
+    start_date: date
+    end_date: date
+    reason: str
+    status: LeaveStatus
+    document_name: Optional[str] = None
+    hr_comments: Optional[str] = None
+    manager_comments: Optional[str] = None
+    admin_notes: Optional[str] = None
+
+@app.post("/api/leave/submit", response_model=LeaveRequestResponse, status_code=status.HTTP_201_CREATED)
+async def submit_leave(
+    employee_id: int = Form(...),
+    start_date: date = Form(...),
+    end_date: date = Form(...),
+    reason: str = Form(..., min_length=5, max_length=250),
+    supporting_document: Optional[UploadFile] = File(None)
+):
+    if start_date > end_date:
+        raise HTTPException(status_code=400, detail="Start date cannot be later than end date.")
+    
+    leave_id = len(LEAVE_DATABASE) + 1
+    doc_name = supporting_document.filename if supporting_document else None
+
+    new_request = {
+        "id": leave_id,
+        "employee_id": employee_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "reason": reason,
+        "status": LeaveStatus.PENDING_HR,
+        "document_name": doc_name,
+        "hr_comments": None,
+        "manager_comments": None,
+        "admin_notes": None
+    }
+    LEAVE_DATABASE.append(new_request)
+    return new_request
+
+@app.patch("/api/leave/{leave_id}/hr-review", response_model=LeaveRequestResponse)
+async def hr_review(leave_id: int, approved: bool, comments: str = Form(...), user_role: UserRole = UserRole.HR):
+    if user_role not in [UserRole.HR, UserRole.SUPER_ADMIN]:
+        raise HTTPException(status_code=403, detail="Unauthorized: Role HR required.")
+    req = next((item for item in LEAVE_DATABASE if item["id"] == leave_id), None)
+    if not req or req["status"] != LeaveStatus.PENDING_HR:
+        raise HTTPException(status_code=400, detail="Invalid request or state.")
+    req["hr_comments"] = comments
+    req["status"] = LeaveStatus.PENDING_MANAGER if approved else LeaveStatus.REJECTED
+    return req
+
+@app.patch("/api/leave/{leave_id}/manager-approve", response_model=LeaveRequestResponse)
+async def manager_approve(leave_id: int, approved: bool, comments: str = Form(...), user_role: UserRole = UserRole.MANAGER):
+    if user_role not in [UserRole.MANAGER, UserRole.SUPER_ADMIN]:
+        raise HTTPException(status_code=403, detail="Unauthorized: Role Manager required.")
+    req = next((item for item in LEAVE_DATABASE if item["id"] == leave_id), None)
+    if not req or req["status"] != LeaveStatus.PENDING_MANAGER:
+        raise HTTPException(status_code=400, detail="Invalid request or state.")
+    req["manager_comments"] = comments
+    req["status"] = LeaveStatus.PENDING_ADMIN if approved else LeaveStatus.REJECTED
+    return req
+
+@app.patch("/api/leave/{leave_id}/admin-finalize", response_model=LeaveRequestResponse)
+async def admin_finalize(leave_id: int, approved: bool, admin_notes: str = Form(...), user_role: UserRole = UserRole.ADMIN):
+    if user_role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+        raise HTTPException(status_code=403, detail="Unauthorized: Role Admin required.")
+    req = next((item for item in LEAVE_DATABASE if item["id"] == leave_id), None)
+    if not req or req["status"] != LeaveStatus.PENDING_ADMIN:
+        raise HTTPException(status_code=400, detail="Invalid request or state.")
+    req["admin_notes"] = admin_notes
+    req["status"] = LeaveStatus.APPROVED if approved else LeaveStatus.REJECTED
+    return req
+
+@app.post("/api/leave/{leave_id}/notify-employee", response_model=dict)
+async def super_admin_notify(leave_id: int, user_role: UserRole = UserRole.SUPER_ADMIN):
+    if user_role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Unauthorized: Super Admin access required.")
+    req = next((item for item in LEAVE_DATABASE if item["id"] == leave_id), None)
+    if not req:
+        raise HTTPException(status_code=404, detail="Leave request not found.")
+    return {"message": "Notification dispatched", "leave_id": req["id"], "status": req["status"]}
+
+@app.get("/api/leave/requests", response_model=List[LeaveRequestResponse])
+async def get_all_requests():
+    return LEAVE_DATABASE
+5. Containerization & Deployment Configurationrequirements.txtPlaintextfastapi==0.115.0
+uvicorn==0.30.0
+pydantic==2.8.2
+python-multipart==0.0.9
+pytest==8.3.2
+requests==2.32.3
+DockerfileDockerfileFROM python:3.10-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+Jenkinsfile (CI/CD Pipeline)Groovypipeline {
+    agent any
+    environment {
+        IMAGE_NAME = 'kunaljadhav/leave-approval-system'
+    }
+    stages {
+        stage('Checkout Code') {
+            steps { checkout scm }
+        }
+        stage('Setup Python & Test') {
+            steps {
+                sh '''
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
+                    pytest --maxfail=1 --disable-warnings -v
+                '''
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+                sh "docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest"
+            }
+        }
+        stage('Deploy Staging Container') {
+            steps {
+                sh '''
+                    docker stop leave-app-container || true
+                    docker rm leave-app-container || true
+                    docker run -d --name leave-app-container -p 8000:8000 ${IMAGE_NAME}:latest
+                '''
+            }
+        }
+    }
+    post {
+        always { cleanWs() }
+        success { echo 'Pipeline successful: Application container deployed!' }
+        failure { echo 'Pipeline failed during execution.' }
+    }
+}
+6. 15-Week Implementation Roadmap SummaryWeeks 1–2: Problem scoping, requirements gathering, and Agile planning (backlog creation, Definition of Done).Weeks 3–4: System architecture design, database schema layout, and GitHub repository initialization.Weeks 5–6: Core feature development (FastAPI endpoints), branching policies, pull requests, and Git conflict resolution.Weeks 7–8: Jenkins server setup, webhook configuration, and pipeline-as-code deployment (Jenkinsfile).Weeks 9–10: Selenium UI and functional test automation integrated into Jenkins as a deployment quality gate.Weeks 11–12: Docker containerization, image versioning, registry publishing, and automated container deployment.Weeks 13–14: Configuration management scripting (Ansible/Puppet), provisioning, idempotency validation, and rollback verification.Week 15: Full end-to-end integration execution, system documentation finalization, and project viva voce defense.

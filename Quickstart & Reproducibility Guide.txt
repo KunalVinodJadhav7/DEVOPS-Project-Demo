@@ -1,0 +1,69 @@
+Quickstart & Reproducibility Guide
+Follow these step-by-step terminal commands to reproduce, run, test, and deploy the Employee Leave Approval System locally on your machine.
+
+Prerequisites Installation
+Ensure you have the following tools installed on your operating system (Linux/macOS/Windows WSL):
+
+Python 3.10+ (python3 --version)
+
+Docker (docker --version)
+
+Git (git --version)
+
+MySQL Server or MariaDB (for executing schema.sql)
+
+Step 1: Clone and Navigate to the Repository
+Open your terminal and run:
+
+Bash
+git clone https://github.com/kunaljadhav/leave-approval-system.git
+cd leave-approval-system
+Step 2: Initialize the Database
+Log into your MySQL command-line client and execute the schema script to set up tables, roles, and triggers:
+
+Bash
+mysql -u root -p < schema.sql
+Step 3: Set Up Local Python Virtual Environment
+Create and activate an isolated python environment, then install required packages:
+
+Bash
+# Create virtual environment
+python3 -m venv venv
+
+# Activate environment
+# On Linux/macOS:
+source venv/bin/activate
+# On Windows (CMD/PowerShell):
+# venv\Scripts\activate
+
+# Install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+Step 4: Run the FastAPI Backend Locally
+Start the development server using Uvicorn:
+
+Bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+Verify Application: Open your browser and navigate to http://localhost:8000/docs to interact with the Swagger UI.
+
+Step 5: Run Automated Tests Locally
+Run pytest to verify backend component logic:
+
+Bash
+pytest --disable-warnings -v
+Step 6: Containerize and Run via Docker
+Build the Docker image locally and spin up the production-ready container:
+
+Bash
+# 1. Build Docker image
+docker build -t kunaljadhav/leave-approval-system:latest .
+
+# 2. Run container mapping port 8000
+docker run -d --name leave-app-container -p 8000:8000 kunaljadhav/leave-approval-system:latest
+
+# 3. View container logs
+docker logs -f leave-app-container
+
+# 4. Stop and remove container (Cleanup)
+docker stop leave-app-container
+docker rm leave-app-container

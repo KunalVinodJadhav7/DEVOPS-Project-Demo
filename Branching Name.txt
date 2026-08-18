@@ -1,0 +1,8 @@
+[main (Production)]
+       │
+       └───► [develop (Staging / Integration)]
+                  │
+                  ├───► [feature/pydantic-validation]
+                  ├───► [feature/hr-review-action]
+                  ├───► [feature/manager-approval]
+                  └───► [feature/admin-oversight-ui]
