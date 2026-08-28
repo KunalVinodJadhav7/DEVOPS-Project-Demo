@@ -1,0 +1,2 @@
+0000000000000000000000000000000000000000 aada34e62d64c6b4e290be0b388033e355947530 Project Author <author@example.com> 1787839575 +0000	branch: Created from HEAD
+aada34e62d64c6b4e290be0b388033e355947530 ec41d85d0deea11b51ab54399955d2b06d61318c Project Author <author@example.com> 1787839575 +0000	commit: ops: add Ansible provisioning and idempotency playbook

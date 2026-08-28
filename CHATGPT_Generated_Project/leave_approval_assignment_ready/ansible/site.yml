@@ -1,0 +1,26 @@
+- name: Provision Employee Leave Approval System host
+  hosts: app
+  become: false
+  vars:
+    app_dir: /opt/leave-approval-system
+  tasks:
+    - name: Create application directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0755'
+    - name: Ensure uploads directory exists
+      ansible.builtin.file:
+        path: "{{ app_dir }}/uploads"
+        state: directory
+        mode: '0755'
+    - name: Deploy release marker
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/RELEASE"
+        content: "{{ lookup('env','BUILD_NUMBER') | default('local', true) }}\n"
+    - name: Validate Docker availability
+      ansible.builtin.command: docker --version
+      changed_when: false
+    - name: Idempotency note
+      ansible.builtin.debug:
+        msg: 'Re-running this playbook should report no changes for stable resources.'

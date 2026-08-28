@@ -1,0 +1,2 @@
+0000000000000000000000000000000000000000 f0c9d21e6167faeca133a2d9d3b82d51c4ec19b1 Project Author <author@example.com> 1787839575 +0000	branch: Created from HEAD
+f0c9d21e6167faeca133a2d9d3b82d51c4ec19b1 c6a16aeec9e4d8183cdfb0e0c1379072a39890c6 Project Author <author@example.com> 1787839575 +0000	commit: build: add Docker image and PostgreSQL compose stack
