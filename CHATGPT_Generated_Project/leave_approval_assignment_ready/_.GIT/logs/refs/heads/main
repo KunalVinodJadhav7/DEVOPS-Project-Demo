@@ -1,3 +1,0 @@
-0000000000000000000000000000000000000000 9ad27b5c6dc048c6e62b2dc2e7c3aa2608603614 Project Author <author@example.com> 1787839573 +0000	commit (initial): chore: initialize DevOps project skeleton
-9ad27b5c6dc048c6e62b2dc2e7c3aa2608603614 9ad27b5c6dc048c6e62b2dc2e7c3aa2608603614 Project Author <author@example.com> 1787839573 +0000	Branch: renamed refs/heads/master to refs/heads/main
-9ad27b5c6dc048c6e62b2dc2e7c3aa2608603614 0c94e2248655ff5cd682c7f614d7e23d70204116 Project Author <author@example.com> 1787839575 +0000	merge develop: Merge made by the 'ort' strategy.
